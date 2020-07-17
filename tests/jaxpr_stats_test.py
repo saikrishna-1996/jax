@@ -56,7 +56,6 @@ class JaxprStatsTest(jtu.JaxTestCase):
       return jnp.sin(s) + jnp.cos(y)
 
     hist = js.primitives_by_shape(make_jaxpr(f)(1., 1.).jaxpr)
-    js.print_histogram(hist)
 
     shapes = [
         'add :: float32[]',
@@ -68,6 +67,14 @@ class JaxprStatsTest(jtu.JaxTestCase):
     ]
     for k in shapes:
       assert hist[k] == 1
+
+  def test_print_histogram(self):
+    def f(x, y):
+      s = jit(jnp.sin)(x)
+      return jnp.sin(s) + jnp.cos(y)
+    hist = js.primitives_by_source(make_jaxpr(f)(1., 1.).jaxpr)
+    js.print_histogram(hist)
+
 
 if __name__ == "__main__":
   absltest.main()

@@ -17,21 +17,24 @@ Summary statistics for jaxprs
 
 import collections
 from functools import partial
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List, Optional
 
-from jax import core, source_info_util
+from jax import core, source_info_util, util
 
+map, unsafe_map = util.safe_map, map
+zip, unsafe_zip = util.safe_zip, zip
+
+
+def all_eqns(jaxpr: core.Jaxpr):
+  for eqn in jaxpr.eqns:
+    yield (jaxpr, eqn)
+  for subjaxpr in core.subjaxprs(jaxpr):
+    yield from all_eqns(subjaxpr)
 
 def collect_eqns(jaxpr: core.Jaxpr, key: Callable):
-  def extend(dst, src):
-    for k, v in src.items():
-      dst[k].extend(v)
-
   d = collections.defaultdict(list)
-  for eqn in jaxpr.eqns:
+  for _, eqn in all_eqns(jaxpr):
     d[key(eqn)].append(eqn)
-  for d_sub in map(partial(collect_eqns, key=key), core.subjaxprs(jaxpr)):
-    extend(d, d_sub)
   return dict(d)
 
 def histogram(jaxpr: core.Jaxpr, key: Callable,
@@ -54,6 +57,58 @@ def primitives_by_shape(jaxpr: core.Jaxpr):
   def key(eqn):
     return (eqn.primitive.name, ' '.join(map(shape_fmt, eqn.outvars)))
   return histogram(jaxpr, key, ' :: '.join)
+
+MaybeEqn = Optional[core.JaxprEqn]
+
+def var_defs_and_refs(jaxpr: core.Jaxpr):
+  defs: Dict[core.Var, MaybeEqn] = {}
+  refs: Dict[core.Var, List[MaybeEqn]] = {}
+
+  def read(a: core.Atom, eqn: MaybeEqn):
+    if a is not core.unitvar and not isinstance(a, core.Literal):
+      assert a in defs, a
+      assert a in refs, a
+      refs[a].append(eqn)
+
+  def write(v: core.Var, eqn: MaybeEqn):
+    assert v is not core.unitvar
+    assert v not in defs, v
+    assert v not in refs, v
+    if v is not core.dropvar:
+      defs[v] = eqn
+      refs[v] = []
+
+  for v in jaxpr.constvars:
+    write(v, None)
+  for v in jaxpr.invars:
+    write(v, None)
+
+  for eqn in jaxpr.eqns:
+    for a in eqn.invars:
+      read(a, eqn)
+    for v in eqn.outvars:
+      write(v, eqn)
+
+  for a in jaxpr.outvars:
+    read(a, None)
+
+  res = [(v, defs[v], refs[v]) for v in defs]
+  subs = map(var_defs_and_refs, core.subjaxprs(jaxpr))
+  return [(jaxpr, res), *subs] if subs else (jaxpr, res)
+
+def vars_by_fanout(jaxpr: core.Jaxpr):
+  def fmt_key(var, eqn):
+    if eqn is None:
+      return f'{var} <- invar'
+    else:
+      src = source_info_util.summarize(eqn.source_info)
+      return f'{var} <- {eqn.primitive.name} @ {src}'
+
+  def hist(jaxpr, reads):
+    return {fmt_key(var, var_def): len(var_refs)
+            for var, var_def, var_refs in reads}
+
+  return [(j, hist(j, reads)) for j, reads in var_defs_and_refs(jaxpr)]
 
 def print_histogram(histogram: Dict[Any, int]):
   count_width = max(len(str(v)) for v in histogram.values())
