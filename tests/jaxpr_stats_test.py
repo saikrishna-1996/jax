@@ -34,19 +34,19 @@ class JaxprStatsTest(jtu.JaxTestCase):
 
     for k in ['add', 'sin', 'cos', 'xla_call']:
       assert k in hist, k
-    assert hist['sin'] == 2
-    assert all(count == 1 for k, count in hist.items() if k != 'sin')
+    self.assertEqual(hist['sin'], 2)
+    self.assertTrue(all(count == 1 for k, count in hist.items() if k != 'sin'))
 
   def test_primitives_by_source(self):
     def f(x, y):
-      s = jit(jnp.sin)(x)
+      s = jnp.sin(x)
       return jnp.sin(s) + jnp.cos(y)
 
     hist = js.primitives_by_source(make_jaxpr(f)(1., 1.).jaxpr)
 
     sin_keys = [k for k in hist.keys() if k.startswith('sin @ ')]
-    assert len(sin_keys) == 2
-    assert all(count == 1 for count in hist.values())
+    self.assertEqual(len(sin_keys), 2)
+    self.assertTrue(all(count == 1 for count in hist.values()))
 
   def test_primitives_by_shape(self):
     def f(x, y):
@@ -66,7 +66,15 @@ class JaxprStatsTest(jtu.JaxTestCase):
         'xla_call :: float32[] *',
     ]
     for k in shapes:
-      assert hist[k] == 1
+      self.assertEqual(hist[k], 1)
+
+  def test_source_locations(self):
+    def f(x, y):
+      s = jnp.sin(x)                  # sin
+      return jnp.sin(s) + jnp.cos(y)  # sin, cos, add
+
+    hist = js.source_locations(make_jaxpr(f)(1., 1.).jaxpr)
+    self.assertEqual(set(hist.values()), set([1, 3]))
 
   def test_print_histogram(self):
     def f(x, y):

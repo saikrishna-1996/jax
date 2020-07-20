@@ -16,7 +16,6 @@ Summary statistics for jaxprs
 """
 
 import collections
-from functools import partial
 from typing import Any, Callable, Dict, List, Optional
 
 from jax import core, source_info_util, util
@@ -57,6 +56,11 @@ def primitives_by_shape(jaxpr: core.Jaxpr):
   def key(eqn):
     return (eqn.primitive.name, ' '.join(map(shape_fmt, eqn.outvars)))
   return histogram(jaxpr, key, ' :: '.join)
+
+def source_locations(jaxpr: core.Jaxpr):
+  def key(eqn):
+    return source_info_util.summarize(eqn.source_info)
+  return histogram(jaxpr, key)
 
 MaybeEqn = Optional[core.JaxprEqn]
 
